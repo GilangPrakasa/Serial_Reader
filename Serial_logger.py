@@ -1,4 +1,4 @@
-import customtkinter,serial,threading,re,time,datetime,sys,re,csv,time,os.path
+import customtkinter,serial,threading,re,time,datetime,re,csv,time,os.path,csv,random,string
 from datetime import datetime
 from CTkMessagebox import CTkMessagebox
 
@@ -11,8 +11,12 @@ ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
 expected = []
 mac = []
 
+date_month = datetime.now().strftime("%m_%Y")
+csv_uid = f'ID_BOARD.csv'
+
 header_text_csv = [
         "DATE",
+        "UID BOARD",
         "INSPECTOR",
         "ID-COBOX",
         "MAC",
@@ -33,8 +37,10 @@ class App(customtkinter.CTk):
     def __init__(self):
         super().__init__()
 
+        self.uid_generator = UniqueIDGenerator(csv_uid)
         # configure window
-        self.title("SERIAL LOGGER")
+        self.title("HARDWARE CHECKER")
+        self.iconbitmap('assets/iconx.ico')
 
         # configure grid layout
         self.grid_columnconfigure((0, 1), weight=1)
@@ -47,18 +53,18 @@ class App(customtkinter.CTk):
         
         # BAUDRATES
         self.label_baud = customtkinter.CTkLabel(self.FR1, text="BAUDRATE", font=customtkinter.CTkFont(size=15, weight="bold"))
-        self.label_baud.grid(row=7, column=0, padx=10, pady=10, sticky="W")
+        self.label_baud.grid(row=5, column=0, padx=10, pady=10, sticky="W")
 
         self.baudrates = ["115200","9600"]
         self.selected_baudrate = customtkinter.StringVar(self)
         self.selected_baudrate.set(self.baudrates[0])
         self.baudrate_option = customtkinter.CTkOptionMenu(self.FR1, width=150, values=self.baudrates, variable=self.selected_baudrate)
-        self.baudrate_option.grid(row=7, column=1, padx=10, pady=10)
+        self.baudrate_option.grid(row=5, column=1, padx=10, pady=10)
         # self.baudrate_option.set("BAUDRATE")
 
         # COM PORTS
         self.label_port = customtkinter.CTkLabel(self.FR1, text="PORT", font=customtkinter.CTkFont(size=15, weight="bold"))
-        self.label_port.grid(row=8, column=0, padx=10, pady=10, sticky="W")
+        self.label_port.grid(row=6, column=0, padx=10, pady=10, sticky="W")
 
         self.available_ports = self.get_serial_ports()
         self.selected_port = customtkinter.StringVar(self)
@@ -67,16 +73,16 @@ class App(customtkinter.CTk):
         else:
             self.selected_port.set("No ports available")
         self.port_option = customtkinter.CTkOptionMenu(self.FR1, width=150, values=self.available_ports, variable=self.selected_port)
-        self.port_option.grid(row=8, column=1, padx=10, pady=10)
+        self.port_option.grid(row=6, column=1, padx=10, pady=10)
         # self.port_option.set("COM PORT")
 
         # START BUTTON
         self.start_button = customtkinter.CTkButton(self.FR1, width=300, text="START APP", command=self.start_reading)
-        self.start_button.grid(row=7, column=2, columnspan=2, padx=10, pady=10)
+        self.start_button.grid(row=7, column=0, columnspan=2, padx=10, pady=10)
 
         # RESTART BUTTON
         self.restart_button = customtkinter.CTkButton(self.FR1, width=300, text="START READING", command=self.stop_reading)
-        self.restart_button.grid(row=8, column=2, columnspan=2, padx=10, pady=10)
+        self.restart_button.grid(row=8, column=0, columnspan=2, padx=10, pady=10)
 
         # TEXT BOX
         self.serial_data = customtkinter.CTkTextbox(self.FR1, width=600, height=300, corner_radius=10)
@@ -100,7 +106,6 @@ class App(customtkinter.CTk):
         self.rtc = customtkinter.CTkCheckBox(self.FR1, text="RTC", text_color="yellow", variable=self.rtc, onvalue="PASS", offvalue="FAIL")
         self.rtc.grid(row=4, column=0, padx=10, pady=10, sticky="w")
 
-        
         self.nor = customtkinter.StringVar(value="FAIL")
         self.nor = customtkinter.CTkCheckBox(self.FR1, text="NOR-FLASH", text_color="yellow", variable=self.nor, onvalue="PASS", offvalue="FAIL")
         self.nor.grid(row=1, column=1, padx=10, pady=10, sticky="w")
@@ -117,28 +122,65 @@ class App(customtkinter.CTk):
         self.pwm100 = customtkinter.CTkCheckBox(self.FR1, text="RUN-100", text_color="yellow", variable=self.pwm100, onvalue="PASS", offvalue="FAIL")
         self.pwm100.grid(row=4, column=1, padx=10, pady=10, sticky="w")
 
-        
-        self.avr = customtkinter.CTkOptionMenu(self.FR1, width=150, values=["PASS","FAIL"])
-        self.avr.grid(row=1, column=2, padx=10, pady=10, sticky="W")
-        self.avr.set("FLASH-AVR")
+        self.label_avr = customtkinter.CTkLabel(self.FR1, text="AVR STATUS", font=customtkinter.CTkFont(size=15, weight="bold"))
+        self.label_avr.grid(row=1, column=2, padx=10, pady=10, sticky="W")
 
-        self.mac = customtkinter.CTkEntry(self.FR1, width=150, placeholder_text="MAC-ADDRESS")
-        self.mac.grid(row=2, column=2, padx=10, pady=10, sticky="W")
+        self.avr_value = customtkinter.StringVar()
+        self.avr = customtkinter.CTkEntry(self.FR1, width=150, text_color="red", placeholder_text="AVR", textvariable=self.avr_value)
+        self.avr.configure(state="disabled")
+        self.avr.grid(row=1, column=3, padx=10, pady=10, sticky="W")
+        self.avr_value.set("None")
 
-        self.rssi = customtkinter.CTkEntry(self.FR1, width=150, placeholder_text="RSSI-VALUE")
-        self.rssi.grid(row=3, column=2, padx=10, pady=10, sticky="W")
+        self.label_mac = customtkinter.CTkLabel(self.FR1, text="MAC ADDRESS", font=customtkinter.CTkFont(size=15, weight="bold"))
+        self.label_mac.grid(row=2, column=2, padx=10, pady=10, sticky="W")
 
-        self.id = customtkinter.CTkEntry(self.FR1, width=150, placeholder_text="ID-COBOX")
-        self.id.grid(row=4, column=2, padx=10, pady=10, sticky="W")
+        self.mac_value = customtkinter.StringVar()
+        self.mac = customtkinter.CTkEntry(self.FR1, width=150, text_color="red", placeholder_text="MAC-ADDRESS", textvariable=self.mac_value)
+        self.mac.configure(state="disabled")
+        self.mac.grid(row=2, column=3, padx=10, pady=10, sticky="W")
+        self.mac_value.set("None")
+
+        self.label_rssi = customtkinter.CTkLabel(self.FR1, text="RSSI VALUE", font=customtkinter.CTkFont(size=15, weight="bold"))
+        self.label_rssi.grid(row=3, column=2, padx=10, pady=10, sticky="W")
+
+        self.rssi_value = customtkinter.StringVar()
+        self.rssi = customtkinter.CTkEntry(self.FR1, width=150, text_color="red", placeholder_text="RSSI-VALUE", textvariable=self.rssi_value)
+        self.rssi.configure(state="disabled")
+        self.rssi.grid(row=3, column=3, padx=10, pady=10, sticky="W")
+        self.rssi_value.set("None")
+
+        self.label_uid = customtkinter.CTkLabel(self.FR1, text="UID CODE", font=customtkinter.CTkFont(size=15, weight="bold"))
+        self.label_uid.grid(row=4, column=2, padx=10, pady=10, sticky="W")
+
+        self.uid_value = customtkinter.StringVar()
+        self.uid = customtkinter.CTkEntry(self.FR1, width=150, text_color="red", placeholder_text="UID", textvariable=self.uid_value)
+        self.uid.configure(state="disabled")
+        self.uid.grid(row=4, column=3, padx=10, pady=10, sticky="W")
+        self.uid_value.set("None")
+
+        self.label_id = customtkinter.CTkLabel(self.FR1, text="ID COBOX", font=customtkinter.CTkFont(size=15, weight="bold"))
+        self.label_id.grid(row=6, column=2, padx=10, pady=10, sticky="W")
+
+        self.id = customtkinter.CTkEntry(self.FR1, width=150, placeholder_text="ID COBOX")
+        self.id.grid(row=6, column=3, padx=10, pady=10, sticky="W")
+
+        self.label_inspector = customtkinter.CTkLabel(self.FR1, text="INSPECTOR", font=customtkinter.CTkFont(size=15, weight="bold"))
+        self.label_inspector.grid(row=5, column=2, padx=10, pady=10, sticky="W")
 
         self.btn_text = customtkinter.StringVar()
         self.inspector_btn = customtkinter.CTkButton(self.FR1, width=150, textvariable=self.btn_text, command=self.set_inspector)
-        self.inspector_btn.grid(row=1, column=3, padx=10, pady=10)
+        self.inspector_btn.grid(row=5, column=3, padx=10, pady=10, sticky="W")
+        self.inspector_btn.configure(fg_color="red")
         self.btn_text.set("Set Inspector")
 
-        self.save = customtkinter.CTkButton(self.FR1, width=150, text="SAVE", command=self.save_result)
-        self.save.grid(row=2, column=3, padx=10, pady=10)
+        self.save = customtkinter.CTkButton(self.FR1, width=300, text="SAVE", command=self.save_result)
+        self.save.grid(row=7, column=2,columnspan=2, padx=10, pady=10)
 
+        self.exit = customtkinter.CTkButton(self.FR1, width=300, text="EXIT", command=self.on_closing)
+        self.exit.grid(row=8, column=2,columnspan=2, padx=10, pady=10)
+
+        self.trademark = customtkinter.CTkLabel(self.FR1, text="CONTACT: mahesa.gilang@efishery.com",width=15,height=15, font=customtkinter.CTkFont(size=12,weight="normal"))
+        self.trademark.grid(row=9, column=0, columnspan=4, padx=5, pady=5, sticky="W")
         
     def get_serial_ports(self):
         try:
@@ -156,65 +198,94 @@ class App(customtkinter.CTk):
     def stop_reading(self):
         if hasattr(self, 'serial_reader'):
             self.serial_reader.stop_reading()
+    
     def set_inspector(self):
         dialog = customtkinter.CTkInputDialog(text="Siapa anda ?", title="Set Inspector")
         self.user_input = dialog.get_input()
-        self.btn_text.set(f"{app.user_input}")
+        self.btn_text.set(f"{self.user_input}")
+        x = str(self.user_input)
+        if "None" in x:
+            CTkMessagebox(title="Message",width=150,height=100,message="ISI DULU INSPECTOR OY!!!!",icon="assets/icon.png", option_1="ok")
+            self.inspector_btn.configure(fg_color="red")
+        else:
+            self.inspector_btn.configure(fg_color="green")
+
+    def generate_id(self):
+        self.new_id = self.uid_generator.generate_id()
+        return self.new_id
+
+    def write_uid(self):
+        self.uid_generator.write_to_csv()
+        return
 
     def save_result(self):
+        try:
         # TIMER
-        self.t = self.serial_reader.get_start_time()
-        end_time = time.time()
-        elapsed_time = end_time - self.t
-        stopwatch = "{:.2f}".format(elapsed_time)
-        self.serial_data.insert("end", f"{stopwatch}\n")
-        data_text = [
-            f"{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
-            f"{self.user_input}",
-            f"{self.id.get()}",
-            f"{self.mac.get()}",
-            f"{self.buzzer.get()}",
-            f"{self.led.get()}",
-            f"{self.button.get()}",
-            f"{self.avr.get()}",
-            f"{self.rtc.get()}",
-            f"{self.nor.get()}",
-            f"{self.rssi.get()}",
-            f"{self.pwm30.get()}",
-            f"{self.pwm70.get()}",
-            f"{self.pwm100.get()}",
-            f"{stopwatch}"
-            ]
-        state_empty = ""
-        if state_empty in data_text:
-            CTkMessagebox(title="Message",width=150,height=100,message="Something is empty",icon="assets/icon.png", option_1="ok")
-        else: 
-            header_text = header_text_csv
-            date_now = datetime.now().strftime("%d.%m.%Y")
-            date_month = datetime.now().strftime("%m.%Y")
-            check_file = os.path.isfile(f"{date_month}.csv")
-            csv_file_path = f"{date_month}.csv"
-            if check_file == False:
+            self.t = self.serial_reader.get_start_time()
+            end_time = time.time()
+            elapsed_time = end_time - self.t
+            stopwatch = "{:.2f}".format(elapsed_time)
+            data_text = [
+                f"{datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
+                f"{self.uid.get()}",
+                f"{self.user_input}",
+                f"{self.id.get()}",
+                f"{self.mac.get()}",
+                f"{self.buzzer.get()}",
+                f"{self.led.get()}",
+                f"{self.button.get()}",
+                f"{self.avr.get()}",
+                f"{self.rtc.get()}",
+                f"{self.nor.get()}",
+                f"{self.rssi.get()}",
+                f"{self.pwm30.get()}",
+                f"{self.pwm70.get()}",
+                f"{self.pwm100.get()}",
+                f"{stopwatch}"
+                ]
+            if 'None' in data_text or 'FAIL' in data_text:
+                CTkMessagebox(title="Message",width=150,height=100,message="Something was empty & fail",icon="assets/icon.png", option_1="ok")
+                # return False
+            else: 
+                self.write_uid()
+                self.serial_data.insert("end", f"\n")
+                self.serial_data.insert("end", f"ELAPSED TIME :{stopwatch} SECONDS\n")
+                self.serial_data.insert("end", f"UID APPEND {self.new_id}\n")
+                header_text = header_text_csv
+                check_file = os.path.isfile(f"DATA_QC_FIRMWARE_{date_month}.csv")
+                csv_file_path = f"DATA_QC_FIRMWARE_{date_month}.csv"
+                if check_file == False:
+                    with open(csv_file_path, mode='a', newline='') as csv_file:
+                        csv_writer = csv.writer(csv_file)
+                        csv_writer.writerow(header_text)
                 with open(csv_file_path, mode='a', newline='') as csv_file:
                     csv_writer = csv.writer(csv_file)
-                    csv_writer.writerow(header_text)
+                    csv_writer.writerow(data_text)
+                    self.avr_value.set("None")
+                    self.avr.configure(text_color="red")
+                    self.mac_value.set("None")
+                    self.mac.configure(text_color="red")
+                    self.rssi_value.set("None")
+                    self.rssi.configure(text_color="red")
+                    self.uid_value.set("None")
+                    self.uid.configure(text_color="red")
+                    self.id.delete(0,20)
+                    self.buzzer.deselect()
+                    self.led.deselect()
+                    self.button.deselect()
+                    self.rtc.deselect()
+                    self.nor.deselect()
+                    self.pwm30.deselect()
+                    self.pwm70.deselect()
+                    self.pwm100.deselect()
+                # self.btn_text.set("Set Inspector")
+        except:
+            CTkMessagebox(title="Message",width=150,height=100,message="Data tidak lengkap",icon="assets/icon.png", option_1="ok")
 
-            with open(csv_file_path, mode='a', newline='') as csv_file:
-                csv_writer = csv.writer(csv_file)
-                csv_writer.writerow(data_text)
-                self.mac.delete(0,20)
-                self.rssi.delete(0,20)
-                self.id.delete(0,20)
-                self.buzzer.deselect()
-                self.led.deselect()
-                self.button.deselect()
-                self.rtc.deselect()
-                self.nor.deselect()
-                self.pwm30.deselect()
-                self.pwm70.deselect()
-                self.pwm100.deselect()
-                self.avr.set("FLASH-AVR")
-                self.btn_text.set("Set Inspector")
+    def on_closing(self):
+        if hasattr(self, 'serial_conn'):
+            self.serial_conn.close()
+        self.destroy()
 
 class SerialReader:
     def __init__(self, app):
@@ -227,7 +298,7 @@ class SerialReader:
         baudrate = int(self.app.selected_baudrate.get())
         port = self.app.selected_port.get()
         try:
-            self.serial_port = serial.Serial(port, baudrate)
+            self.serial_port = serial.Serial(port, baudrate,timeout=5)
             self.is_reading = True
             self.read_thread = threading.Thread(target=self.read_serial)
             self.read_thread.daemon = True
@@ -255,11 +326,41 @@ class SerialReader:
                     state = split[1].strip()
                     expected.append(state)
                     print(expected)
+                if "verified correctly!" in text:
+                    self.app.avr_value.set("AVR PASS")
+                    self.app.avr.configure(text_color="yellow")
+                if "[FAIL]" in text:
+                    self.app.avr_value.set("AVR FAIL")
+                    self.app.avr.configure(text_color="red")
                 if "MAC ADDRESS:" in text:
                     start_index = text.index(":") + 15
                     mac_address = text[start_index:].strip()
-                    print(mac_address)
-
+                    if mac_address:
+                        print(mac_address)
+                        self.app.mac_value.set(f"{mac_address}")
+                        self.app.mac.configure(text_color="yellow")
+                    else:
+                        print("No match found")
+                        self.app.mac_value.set("Failed")
+                        self.app.mac.configure(text_color="red")
+                if "AksesPoin_eFishery:" in text:
+                    pattern = r'-\d+ dBm \[.*\]'
+                    match = re.search(pattern, text)
+                    if match:
+                        rssi_value = match.group(0)
+                        print(rssi_value)
+                        self.app.rssi_value.set(f"{rssi_value}")
+                        self.app.rssi.configure(text_color="yellow")
+                    else:
+                        print("No match found")
+                        self.app.rssi_value.set("Failed")
+                        self.app.rssi.configure(text_color="red")
+                if "TEST FINISHED" in text:
+                    self.unique_id =  self.app.generate_id()
+                    print("Generated ID:",  self.unique_id)
+                    self.app.uid_value.set(f"{ self.unique_id}")
+                    self.app.uid.configure(text_color="yellow")
+                                  
     def stop_reading(self):
         if self.is_reading:
             self.is_reading = False
@@ -275,6 +376,53 @@ class SerialReader:
 
     def get_start_time(self):
         return self.start_time
+    
+class UniqueIDGenerator:
+    def __init__(self, csv_filename):
+        self.existing_ids = set()
+        self.csv_filename = csv_filename
+        self.load_existing_ids()
+
+    def load_existing_ids(self):
+        try:
+            with open(self.csv_filename, 'r', newline='') as file:
+                reader = csv.reader(file)
+                for row in reader:
+                    self.existing_ids.add(row[0])  # Assuming ID is in the first column
+        except FileNotFoundError:
+            # If the file does not exist, no existing IDs to load
+            pass
+
+    def generate_id(self):
+        while True:
+            self.new_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
+            if self.new_id not in self.existing_ids:
+                self.existing_ids.add(self.new_id)
+                return self.new_id
+
+    def check_text_in_csv(self):
+        try:
+            with open(self.csv_filename, 'r', newline='') as file:
+                reader = csv.reader(file)
+                for row in reader:
+                    if row[0] == self.new_id:
+                        return True
+                return False
+        except FileNotFoundError:
+            # print(f"File '{self.csv_filename}' not found.")
+            return False
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            return False
+
+    def write_to_csv(self):
+        if self.check_text_in_csv():
+            print(f"UID {self.new_id} ALREADY EXIST, PLEASE RESTART READING")
+            CTkMessagebox(title="Message",width=150,height=100,message=f"UID {self.new_id} ALREADY EXIST, PLEASE RESTART READING",icon="assets/icon.png", option_1="ok")
+        else:
+            with open(self.csv_filename, 'a', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow([self.new_id,datetime.now().strftime("%d/%m/%Y")])
 
 if __name__ == "__main__":
     app = App()
